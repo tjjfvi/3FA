@@ -1,5 +1,5 @@
 use std::{
-  collections::{BTreeSet, HashSet},
+  collections::{BTreeMap, BTreeSet},
   fmt::Debug,
 };
 
@@ -238,22 +238,23 @@ where
   }
 }
 
-fn is_empty<X, D: Dfa<X>>(dfa: D, alphabet: impl Clone + Iterator<Item = X>) -> bool
+fn is_empty<X: Clone + Debug, D: Dfa<X>>(dfa: D, alphabet: impl Clone + Iterator<Item = X>) -> bool
 where
   D::State: Clone + Ord,
 {
   let mut visited = BTreeSet::new();
-  let mut next = BTreeSet::new();
-  next.insert(dfa.initial());
+  let mut next = BTreeMap::new();
+  next.insert(dfa.initial(), vec![]);
   while !next.is_empty() {
-    for state in std::mem::take(&mut next) {
+    for (state, msg) in std::mem::take(&mut next) {
       if dfa.accept(&state) {
+        dbg!(msg);
         return false;
       }
       for char in alphabet.clone() {
-        let state = dfa.next(state.clone(), char);
+        let state = dfa.next(state.clone(), char.clone());
         if visited.insert(state.clone()) {
-          next.insert(state);
+          next.insert(state, msg.iter().cloned().chain([char]).collect());
         }
       }
     }
@@ -261,7 +262,7 @@ where
   true
 }
 
-fn dfa_equal<X: Clone, A: Dfa<X>, B: Dfa<X>>(
+fn dfa_equal<X: Clone + Debug, A: Dfa<X>, B: Dfa<X>>(
   a: A,
   b: B,
   alphabet: impl Clone + Iterator<Item = X>,
@@ -274,17 +275,17 @@ where
 }
 
 macro_rules! regex {
-  ( (?= $x:expr) ) => {
-    LookAhead(regex!($x))
+  ( (?= $($x:tt)*) ) => {
+    LookAhead(regex!($($x)*))
   };
-  ( (?! $x:expr) ) => {
-    LookAhead(Not(regex!($x)))
+  ( (?! $($x:tt)*) ) => {
+    LookAhead(Not(regex!($($x)*)))
   };
-  ( (?<= $x:expr) ) => {
-    LookBehind(regex!($x))
+  ( (?<= $($x:tt)*) ) => {
+    LookBehind(regex!($($x)*))
   };
-  ( (?<! $x:expr) ) => {
-    LookBehind(Not(regex!($x)))
+  ( (?<! $($x:tt)*) ) => {
+    LookBehind(Not(regex!($($x)*)))
   };
   ( ($x:expr) ) => {
     regex!($x)
@@ -293,25 +294,31 @@ macro_rules! regex {
     $x
   };
   ( $x:literal ) => {
-    $x
+    FromDfa($x)
+  };
+  ( ^ ) => {
+    Start
+  };
+  ( $ ) => {
+    End
   };
   ( . ) => {
-    Dot
+    FromDfa(Dot)
   };
   ( $x:tt | $($y:tt)* ) => {
     Or(regex!($x), regex!($($y)*))
   };
   ( $x:tt ? $($y:tt)* ) => {
-    regex!({Or(Empty, regex!($x))} $($y)*)
+    regex!({Or(FromDfa(Empty), regex!($x))} $($y)*)
   };
   ( $x:tt * $($y:tt)* ) => {
-    regex!({Or(Empty, Plus(regex!($x)))} $($y)*)
+    regex!({Or(FromDfa(Empty), Plus(regex!($x)))} $($y)*)
   };
   ( $x:tt + $($y:tt)* ) => {
     regex!({Plus(regex!($x))} $($y)*)
   };
-  ( $x:tt $y:tt $($z:tt)* ) => {
-    regex!({Concat(regex!($x), regex!($y))} $($z)*)
+  ( $x:tt $($y:tt)+ ) => {
+    Concat(regex!($x), regex!($($y)+))
   };
 }
 
@@ -333,101 +340,103 @@ fn main() {
   assert!(!matches(x, b"a".into_iter().copied()));
   assert!(!matches(x, b"aba".into_iter().copied()));
   assert!(!matches(x, b"bbb".into_iter().copied()));
+  let y = ToDfa(regex!(^(?= b"a"* b"b") b"aaa"));
+  assert!(matches(y, b"aaab".into_iter().copied()));
+  assert!(matches(y, b"aaaab".into_iter().copied()));
+  assert!(matches(y, b"aaaabab".into_iter().copied()));
+  assert!(!matches(y, b"b".into_iter().copied()));
+  assert!(!matches(y, b"aab".into_iter().copied()));
+  assert!(!matches(y, b"aabaaab".into_iter().copied()));
+  dbg!(regex!(b"aaa" b"a"* b"b" .*));
+  assert!(dfa_equal(
+    y,
+    regex!(b"aaa" b"a"* b"b" .*),
+    b"abx".iter().copied()
+  ));
 }
 
 trait Regex<X> {
+  type Pre;
   type State;
-  fn initial(&self) -> Self::State;
+  type Post;
+  fn initial(&self) -> Self::Pre;
+  fn pre(&self, state: Self::Pre, char: X) -> Self::Pre;
   fn next(&self, state: Self::State, char: X) -> Self::State;
-  fn accept(&self, state: &Self::State) -> bool;
-  fn enter(&self, state: Self::State) -> Self::State;
-  fn exit(&self, state: Self::State) -> Self::State;
+  fn post(&self, state: Self::Post, char: X) -> Self::Post;
+  fn accept(&self, state: &Self::Post) -> bool;
+  fn enter(&self, state: Self::Pre) -> Self::State;
+  fn exit(&self, state: Self::State) -> Self::Post;
 }
 
+#[derive(Debug, Clone, Copy)]
 struct Start;
 
-enum StartState {
-  Start,
-  Entered,
-  Exited,
-  Fail,
-}
-
 impl<X> Regex<X> for Start {
-  type State = StartState;
+  type Pre = bool;
+  type State = bool;
+  type Post = bool;
   fn initial(&self) -> Self::State {
-    StartState::Start
+    true
   }
-  fn next(&self, state: Self::State, _: X) -> Self::State {
-    match state {
-      StartState::Exited => StartState::Exited,
-      _ => StartState::Fail,
-    }
+  fn pre(&self, _: Self::Pre, _: X) -> Self::Pre {
+    false
   }
-  fn accept(&self, state: &Self::State) -> bool {
-    match state {
-      StartState::Entered => true,
-      _ => false,
-    }
+  fn next(&self, _: Self::State, _: X) -> Self::State {
+    false
   }
-  fn enter(&self, state: Self::State) -> Self::State {
-    match state {
-      StartState::Start => StartState::Entered,
-      _ => StartState::Fail,
-    }
+  fn post(&self, state: Self::Post, _: X) -> Self::Post {
+    state
   }
-  fn exit(&self, state: Self::State) -> Self::State {
-    match state {
-      StartState::Entered => StartState::Exited,
-      _ => StartState::Fail,
-    }
+  fn accept(&self, state: &Self::Post) -> bool {
+    *state
+  }
+  fn enter(&self, state: Self::Pre) -> Self::State {
+    state
+  }
+  fn exit(&self, state: Self::State) -> Self::Post {
+    state
   }
 }
 
+#[derive(Debug, Clone, Copy)]
 struct End;
 
-enum EndState {
-  Initial,
-  Entered,
-  Exited,
-  Fail,
-}
-
 impl<X> Regex<X> for End {
-  type State = EndState;
-  fn initial(&self) -> Self::State {
-    EndState::Initial
+  type Pre = ();
+  type State = bool;
+  type Post = bool;
+  fn initial(&self) -> Self::Pre {
+    ()
   }
-  fn next(&self, state: Self::State, _: X) -> Self::State {
-    match state {
-      EndState::Initial => EndState::Initial,
-      _ => EndState::Fail,
-    }
+  fn pre(&self, _: Self::Pre, _: X) -> Self::Pre {
+    ()
   }
-  fn accept(&self, state: &Self::State) -> bool {
-    match state {
-      EndState::Exited => true,
-      _ => false,
-    }
+  fn next(&self, _: Self::State, _: X) -> Self::State {
+    false
   }
-  fn enter(&self, state: Self::State) -> Self::State {
-    match state {
-      EndState::Initial => EndState::Entered,
-      _ => EndState::Fail,
-    }
+  fn post(&self, _: Self::Post, _: X) -> Self::Post {
+    false
   }
-  fn exit(&self, state: Self::State) -> Self::State {
-    match state {
-      EndState::Entered => EndState::Exited,
-      _ => EndState::Fail,
-    }
+  fn accept(&self, state: &Self::Post) -> bool {
+    *state
+  }
+  fn enter(&self, _: Self::Pre) -> Self::State {
+    true
+  }
+  fn exit(&self, state: Self::State) -> Self::Post {
+    state
   }
 }
 
 impl<X: Clone, A: Regex<X>, B: Regex<X>> Regex<X> for Or<A, B> {
+  type Pre = (A::Pre, B::Pre);
   type State = (A::State, B::State);
-  fn initial(&self) -> Self::State {
+  type Post = (A::Post, B::Post);
+  fn initial(&self) -> Self::Pre {
     (self.0.initial(), self.1.initial())
+  }
+  fn pre(&self, state: Self::Pre, char: X) -> Self::Pre {
+    (self.0.pre(state.0, char.clone()), self.1.pre(state.1, char))
   }
   fn next(&self, state: Self::State, char: X) -> Self::State {
     (
@@ -435,196 +444,242 @@ impl<X: Clone, A: Regex<X>, B: Regex<X>> Regex<X> for Or<A, B> {
       self.1.next(state.1, char),
     )
   }
-  fn accept(&self, state: &Self::State) -> bool {
+  fn post(&self, state: Self::Post, char: X) -> Self::Post {
+    (
+      self.0.post(state.0, char.clone()),
+      self.1.post(state.1, char),
+    )
+  }
+  fn accept(&self, state: &Self::Post) -> bool {
     self.0.accept(&state.0) || self.1.accept(&state.1)
   }
-  fn enter(&self, state: Self::State) -> Self::State {
+  fn enter(&self, state: Self::Pre) -> Self::State {
     (self.0.enter(state.0), self.1.enter(state.1))
   }
-  fn exit(&self, state: Self::State) -> Self::State {
+  fn exit(&self, state: Self::State) -> Self::Post {
     (self.0.exit(state.0), self.1.exit(state.1))
   }
 }
 
-enum ConcatState<A, B> {
-  Initial((A, B)),
-  Entered((A, B), BTreeSet<(A, B)>),
-  Exited(BTreeSet<(A, B)>),
-  Fail,
-}
-
 impl<X: Clone, A: Regex<X>, B: Regex<X>> Regex<X> for Concat<A, B>
 where
+  B::Pre: Clone,
   A::State: Ord + Clone,
-  B::State: Ord + Clone,
+  A::Post: Ord,
+  B::Post: Ord,
+  B::State: Ord,
 {
-  type State = ConcatState<A::State, B::State>;
-  fn initial(&self) -> Self::State {
-    ConcatState::Initial((self.0.initial(), self.1.initial()))
+  type Pre = (A::Pre, B::Pre);
+  type State = ((A::State, B::Pre), BTreeSet<(A::Post, B::State)>);
+  type Post = BTreeSet<(A::Post, B::Post)>;
+  fn initial(&self) -> Self::Pre {
+    (self.0.initial(), self.1.initial())
   }
-  fn next(&self, state: Self::State, char: X) -> Self::State {
-    let next_pair = |x: (A::State, B::State)| {
-      (
-        self.0.next(x.0, char.clone()),
-        self.1.next(x.1, char.clone()),
-      )
-    };
-    match state {
-      ConcatState::Initial(x) => ConcatState::Initial(next_pair(x)),
-      ConcatState::Entered(x, state) => {
-        let x = next_pair(x);
-        ConcatState::Entered(
-          x.clone(),
-          state
-            .into_iter()
-            .map(next_pair)
-            .chain([(self.0.exit(x.0), self.1.enter(x.1))])
-            .collect(),
+  fn pre(&self, state: Self::Pre, char: X) -> Self::Pre {
+    (
+      self.0.pre(state.0, char.clone()),
+      self.1.pre(state.1, char.clone()),
+    )
+  }
+  fn next(&self, (x, state): Self::State, char: X) -> Self::State {
+    let x = (
+      self.0.next(x.0, char.clone()),
+      self.1.pre(x.1, char.clone()),
+    );
+    (
+      x.clone(),
+      state
+        .into_iter()
+        .map(|x| {
+          (
+            self.0.post(x.0, char.clone()),
+            self.1.next(x.1, char.clone()),
+          )
+        })
+        .chain([(self.0.exit(x.0), self.1.enter(x.1))])
+        .collect(),
+    )
+  }
+  fn post(&self, state: Self::Post, char: X) -> Self::Post {
+    state
+      .into_iter()
+      .map(|x| {
+        (
+          self.0.post(x.0, char.clone()),
+          self.1.post(x.1, char.clone()),
         )
-      }
-      ConcatState::Exited(state) => ConcatState::Exited(state.into_iter().map(next_pair).collect()),
-      ConcatState::Fail => ConcatState::Fail,
-    }
+      })
+      .collect()
   }
-  fn accept(&self, state: &Self::State) -> bool {
-    match state {
-      ConcatState::Exited(state) => state
-        .iter()
-        .any(|x| self.0.accept(&x.0) && self.1.accept(&x.1)),
-      _ => false,
-    }
+  fn accept(&self, state: &Self::Post) -> bool {
+    state
+      .iter()
+      .any(|x| self.0.accept(&x.0) && self.1.accept(&x.1))
   }
-  fn enter(&self, state: Self::State) -> Self::State {
-    match state {
-      ConcatState::Initial(mut x) => {
-        x.0 = self.0.enter(x.0);
-        ConcatState::Entered(
-          x.clone(),
-          [(self.0.exit(x.0), self.1.enter(x.1))]
-            .into_iter()
-            .collect(),
-        )
-      }
-      _ => ConcatState::Fail,
-    }
+  fn enter(&self, state: Self::Pre) -> Self::State {
+    let state = (self.0.enter(state.0), state.1);
+    (
+      state.clone(),
+      [(self.0.exit(state.0), self.1.enter(state.1))]
+        .into_iter()
+        .collect(),
+    )
   }
-  fn exit(&self, state: Self::State) -> Self::State {
-    match state {
-      ConcatState::Entered(_, state) => {
-        ConcatState::Exited(state.into_iter().map(|x| (x.0, self.1.exit(x.1))).collect())
-      }
-      _ => ConcatState::Fail,
-    }
+  fn exit(&self, state: Self::State) -> Self::Post {
+    state
+      .1
+      .into_iter()
+      .map(|x| (x.0, self.1.exit(x.1)))
+      .collect()
   }
-}
-
-enum PlusState<A> {
-  Initial(A),
-  Entered(A, BTreeSet<(BTreeSet<A>, A)>),
-  Exited(BTreeSet<BTreeSet<A>>),
-  Fail,
 }
 
 impl<X: Clone, A: Regex<X>> Regex<X> for Plus<A>
 where
+  A::Pre: Clone,
   A::State: Ord + Clone,
+  A::Post: Ord + Clone,
 {
-  type State = PlusState<A::State>;
-  fn initial(&self) -> Self::State {
-    PlusState::Initial(self.0.initial())
+  type Pre = A::Pre;
+  type State = (A::Pre, BTreeSet<(BTreeSet<A::Post>, A::State)>);
+  type Post = BTreeSet<BTreeSet<A::Post>>;
+  fn initial(&self) -> Self::Pre {
+    self.0.initial()
+  }
+  fn pre(&self, state: Self::Pre, char: X) -> Self::Pre {
+    self.0.pre(state, char)
   }
   fn next(&self, state: Self::State, char: X) -> Self::State {
-    match state {
-      PlusState::Initial(x) => PlusState::Initial(self.0.next(x, char)),
-      PlusState::Entered(a, state) => {
-        let a = self.0.next(a, char.clone());
-        PlusState::Entered(
-          a.clone(),
-          state
-            .into_iter()
-            .map(|x: (BTreeSet<A::State>, A::State)| {
-              (
-                x.0
-                  .into_iter()
-                  .map(|x| self.0.next(x, char.clone()))
-                  .collect::<BTreeSet<_>>(),
-                self.0.next(x.1, char.clone()),
-              )
-            })
-            .flat_map(|mut x| {
-              [x.clone(), {
-                x.0.insert(x.1);
-                (x.0, a.clone())
-              }]
-            })
-            .collect(),
-        )
-      }
-      PlusState::Exited(state) => PlusState::Exited(
-        state
-          .into_iter()
-          .map(|x| {
-            x.into_iter()
-              .map(|x| self.0.next(x, char.clone()))
-              .collect()
-          })
-          .collect(),
-      ),
-      PlusState::Fail => PlusState::Fail,
-    }
-  }
-  fn accept(&self, state: &Self::State) -> bool {
-    match state {
-      PlusState::Exited(state) => state
-        .iter()
-        .any(|x| x.into_iter().all(|x| self.0.accept(x))),
-      _ => false,
-    }
-  }
-  fn enter(&self, state: Self::State) -> Self::State {
-    match state {
-      PlusState::Initial(x) => PlusState::Entered(
-        x.clone(),
-        [(BTreeSet::new(), self.0.enter(x))].into_iter().collect(),
-      ),
-      _ => PlusState::Fail,
-    }
-  }
-  fn exit(&self, state: Self::State) -> Self::State {
-    match state {
-      PlusState::Entered(_, state) => PlusState::Exited(
-        state
-          .into_iter()
-          .map(|mut x| {
-            x.0.insert(self.0.exit(x.1));
+    let a = self.0.pre(state.0, char.clone());
+    (
+      a.clone(),
+      state
+        .1
+        .into_iter()
+        .map(|x| {
+          (
             x.0
-          })
-          .collect(),
-      ),
-      _ => PlusState::Fail,
-    }
+              .into_iter()
+              .map(|x| self.0.post(x, char.clone()))
+              .collect::<BTreeSet<_>>(),
+            self.0.next(x.1, char.clone()),
+          )
+        })
+        .flat_map(|mut x| {
+          [x.clone(), {
+            x.0.insert(self.0.exit(x.1));
+            (x.0, self.0.enter(a.clone()))
+          }]
+        })
+        .collect(),
+    )
+  }
+  fn post(&self, state: Self::Post, char: X) -> Self::Post {
+    state
+      .into_iter()
+      .map(|x| {
+        x.into_iter()
+          .map(|x| self.0.post(x, char.clone()))
+          .collect()
+      })
+      .collect()
+  }
+  fn accept(&self, state: &Self::Post) -> bool {
+    state
+      .iter()
+      .any(|x| x.into_iter().all(|x| self.0.accept(x)))
+  }
+  fn enter(&self, state: Self::Pre) -> Self::State {
+    (
+      state.clone(),
+      [(BTreeSet::new(), self.0.enter(state))]
+        .into_iter()
+        .collect(),
+    )
+  }
+  fn exit(&self, state: Self::State) -> Self::Post {
+    state
+      .1
+      .into_iter()
+      .map(|mut x| {
+        x.0.insert(self.0.exit(x.1));
+        x.0
+      })
+      .collect()
   }
 }
 
 #[derive(Debug, Clone, Copy)]
 struct LookAhead<A>(A);
 
+impl<X: Clone, A: Regex<X>> Regex<X> for LookAhead<A>
+where
+  A::Pre: Clone,
+  A::State: Clone + Ord,
+  A::Post: Ord,
+{
+  type Pre = A::Pre;
+  type State = Option<A::Pre>;
+  type Post = Option<(BTreeSet<A::State>, BTreeSet<A::Post>)>;
+  fn initial(&self) -> Self::Pre {
+    self.0.initial()
+  }
+  fn pre(&self, state: Self::Pre, char: X) -> Self::Pre {
+    self.0.pre(state, char)
+  }
+  fn next(&self, _: Self::State, _: X) -> Self::State {
+    None
+  }
+  fn post(&self, state: Self::Post, char: X) -> Self::Post {
+    let state = state?;
+    let s = state
+      .0
+      .into_iter()
+      .map(|x| self.0.next(x, char.clone()))
+      .collect::<BTreeSet<_>>();
+    let e = state
+      .1
+      .into_iter()
+      .map(|x| self.0.post(x, char.clone()))
+      .chain(s.iter().map(|x| self.0.exit(x.clone())))
+      .collect();
+    Some((s, e))
+  }
+  fn accept(&self, state: &Self::Post) -> bool {
+    state
+      .as_ref()
+      .map_or(false, |state| state.1.iter().any(|x| self.0.accept(x)))
+  }
+  fn enter(&self, state: Self::Pre) -> Self::State {
+    Some(state)
+  }
+  fn exit(&self, state: Self::State) -> Self::Post {
+    let state = self.0.enter(state?);
+    Some((
+      [state.clone()].into_iter().collect(),
+      [self.0.exit(state)].into_iter().collect(),
+    ))
+  }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ToDfa<A>(A);
 
 impl<X: Clone, A: Regex<X>> Dfa<X> for ToDfa<A>
 where
+  A::Pre: Clone,
   A::State: Ord + Clone,
+  A::Post: Ord + Clone,
 {
-  type State = (A::State, BTreeSet<A::State>, BTreeSet<A::State>);
+  type State = (A::Pre, BTreeSet<A::State>, BTreeSet<A::Post>);
   fn initial(&self) -> Self::State {
     let i = self.0.initial();
     let s = self.0.enter(i.clone());
-    let e = self.0.exit(i.clone());
+    let e = self.0.exit(s.clone());
     (i, [s].into_iter().collect(), [e].into_iter().collect())
   }
   fn next(&self, state: Self::State, char: X) -> Self::State {
-    let i = self.0.next(state.0, char.clone());
+    let i = self.0.pre(state.0, char.clone());
     let s = state
       .1
       .into_iter()
@@ -634,12 +689,55 @@ where
     let e = state
       .2
       .into_iter()
-      .map(|x| self.0.next(x, char.clone()))
+      .map(|x| self.0.post(x, char.clone()))
       .chain(s.iter().map(|x| self.0.exit(x.clone())))
       .collect();
     (i, s, e)
   }
   fn accept(&self, state: &Self::State) -> bool {
     state.2.iter().any(|x| self.0.accept(x))
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FromDfa<A>(A);
+
+impl<X, A: Dfa<X>> Dfa<X> for FromDfa<A> {
+  type State = A::State;
+  fn initial(&self) -> Self::State {
+    self.0.initial()
+  }
+  fn accept(&self, state: &Self::State) -> bool {
+    self.0.accept(state)
+  }
+  fn next(&self, state: Self::State, char: X) -> Self::State {
+    self.0.next(state, char)
+  }
+}
+
+impl<X, A: Dfa<X>> Regex<X> for FromDfa<A> {
+  type Pre = ();
+  type State = A::State;
+  type Post = bool;
+  fn initial(&self) -> Self::Pre {
+    ()
+  }
+  fn pre(&self, _: Self::Pre, _: X) -> Self::Pre {
+    ()
+  }
+  fn next(&self, state: Self::State, char: X) -> Self::State {
+    self.0.next(state, char)
+  }
+  fn post(&self, state: Self::Post, _: X) -> Self::Post {
+    state
+  }
+  fn accept(&self, state: &Self::Post) -> bool {
+    *state
+  }
+  fn enter(&self, _: Self::Pre) -> Self::State {
+    self.0.initial()
+  }
+  fn exit(&self, state: Self::State) -> Self::Post {
+    self.0.accept(&state)
   }
 }
