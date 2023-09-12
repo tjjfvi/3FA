@@ -39,7 +39,7 @@ where
         states.get_mut(id).unwrap().1.insert(char.clone(), next);
       }
     }
-    0
+    id
   }
 }
 

@@ -63,4 +63,6 @@ fn main() {
   println!("{}", to_regex(y, alphabet));
 
   dbg!(bake_dfa(y, alphabet));
+
+  assert_eq!(equal(y, bake_dfa(y, alphabet), alphabet), Ok(()));
 }
