@@ -1,3 +1,5 @@
+use crate::*;
+
 mod anything;
 mod concat;
 mod dot;
@@ -10,7 +12,7 @@ mod plus;
 mod str;
 
 pub trait Dfa<X> {
-  type State;
+  type State: Finite;
   fn initial(&self) -> Self::State;
   fn next(&self, state: Self::State, char: X) -> Option<Self::State>;
   fn accept(&self, state: &Self::State) -> bool;

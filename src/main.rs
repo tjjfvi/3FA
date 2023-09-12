@@ -2,60 +2,61 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod dfa;
 mod equal;
+mod finite;
 mod matches;
 mod regex;
 mod threefa;
+mod to_regex;
+
 use dfa::*;
 use equal::*;
+use finite::*;
 use matches::*;
 use regex::*;
 use threefa::*;
+use to_regex::*;
 
 fn main() {
   #[rustfmt::skip]
-  let x = regex!(b"a"* b"b");
-  assert!(matches(x, b"b".into_iter().copied()));
-  assert!(matches(x, b"ab".into_iter().copied()));
-  assert!(matches(x, b"aaab".into_iter().copied()));
-  assert!(!matches(x, b"".into_iter().copied()));
-  assert!(!matches(x, b"a".into_iter().copied()));
-  assert!(!matches(x, b"aba".into_iter().copied()));
-  assert!(!matches(x, b"bbb".into_iter().copied()));
-  let y = ToDfa(regex!(^(?= b"a"* b"b") b"aaa"));
-  assert!(matches(y, b"aaab".into_iter().copied()));
-  assert!(matches(y, b"aaaab".into_iter().copied()));
-  assert!(matches(y, b"aaaabab".into_iter().copied()));
-  assert!(!matches(y, b"b".into_iter().copied()));
-  assert!(!matches(y, b"aab".into_iter().copied()));
-  assert!(!matches(y, b"aabaaab".into_iter().copied()));
-  let y2 = regex!(b"aaa" b"a"* b"b" .*);
-  assert!(!matches(y2, b"b".into_iter().copied()));
-  assert_eq!(dfa_equal(y, y2, b"abx".iter().copied()), Ok(()));
+  let x = dfa![ a* b ];
+  assert!(matches(x, b"b"));
+  assert!(matches(x, b"ab"));
+  assert!(matches(x, b"aaab"));
+  assert!(!matches(x, b""));
+  assert!(!matches(x, b"a"));
+  assert!(!matches(x, b"aba"));
+  assert!(!matches(x, b"bbb"));
+
+  let y = regex![ ^(?= a* b) aaa ];
+  assert!(matches(y, b"aaab"));
+  assert!(matches(y, b"aaaab"));
+  assert!(matches(y, b"aaaabab"));
+  assert!(!matches(y, b"b"));
+  assert!(!matches(y, b"aab"));
+  assert!(!matches(y, b"aabaaab"));
+
+  let alphabet = b"abx";
+
+  assert_eq!(equal(y, dfa![ aaa a* b .* ], alphabet), Ok(()));
 
   assert_eq!(
-    dfa_equal(
-      ToDfa(regex!((?=a* b) aaa)),
-      regex!(.* aaa a* b .*),
-      b"abx".iter().copied()
-    ),
+    equal(regex![ (?=a* b) aaa ], dfa![ .* aaa a* b .* ], alphabet),
     Ok(())
   );
 
   assert_eq!(
-    dfa_equal(
-      ToDfa(regex!((?=.* b$) a+)),
-      regex!(.* a .* b),
-      b"abx".iter().copied()
-    ),
+    equal(regex![ (?= .* b $) a+ ], dfa![ .* a .* b ], alphabet),
     Ok(())
   );
 
   assert_eq!(
-    dfa_equal(
-      ToDfa(regex!(((?<=ab)...(?!b))+$)),
-      regex!(.* ab ((a|x) ab)* ...),
-      b"abx".iter().copied()
+    equal(
+      regex![ ((?<= ab) ... (?! b))+ $ ],
+      dfa![ .* ab ((a|x) ab)* ... ],
+      alphabet
     ),
     Ok(())
   );
+
+  println!("{}", to_regex(regex![ ^ (?=a* b) aaa ], alphabet));
 }

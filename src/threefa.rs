@@ -1,3 +1,5 @@
+use crate::*;
+
 mod concat;
 mod end;
 mod from_dfa;
@@ -10,9 +12,9 @@ mod start;
 mod to_dfa;
 
 pub trait ThreeFA<X> {
-  type Pre;
-  type Active;
-  type Post;
+  type Pre: Finite;
+  type Active: Finite;
+  type Post: Finite;
   fn initial(&self) -> Self::Pre;
   fn step_pre(&self, state: Self::Pre, char: X) -> Option<Self::Pre>;
   fn step_active(&self, state: Self::Active, char: X) -> Option<Self::Active>;

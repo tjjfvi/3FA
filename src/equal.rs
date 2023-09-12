@@ -1,9 +1,9 @@
 use crate::*;
 
-pub fn dfa_equal<X: Clone, A: Dfa<X>, B: Dfa<X>>(
+pub fn equal<X: Clone, A: Dfa<X>, B: Dfa<X>>(
   a: A,
   b: B,
-  alphabet: impl Clone + Iterator<Item = X>,
+  alphabet: impl Clone + IntoIterator<Item = X>,
 ) -> Result<(), Vec<X>>
 where
   A::State: Clone + Ord,
@@ -14,7 +14,7 @@ where
 
 pub fn is_empty<X: Clone, D: Dfa<X>>(
   dfa: D,
-  alphabet: impl Clone + Iterator<Item = X>,
+  alphabet: impl Clone + IntoIterator<Item = X>,
 ) -> Result<(), Vec<X>>
 where
   D::State: Clone + Ord,

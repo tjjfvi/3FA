@@ -1,19 +1,33 @@
 #[macro_export]
 macro_rules! regex {
+    ($($x:tt)*) => {
+        ToDfa(_regex!($($x)*))
+    };
+}
+
+#[macro_export]
+macro_rules! dfa {
+    ($($x:tt)*) => {
+        _regex!($($x)*)
+    };
+}
+
+#[macro_export]
+macro_rules! _regex {
   ( (?= $($x:tt)*) ) => {
-    LookAhead(regex!($($x)*))
+    LookAhead(_regex!($($x)*))
   };
   ( (?! $($x:tt)*) ) => {
-    LookAhead(Not(regex!($($x)*)))
+    LookAhead(Not(_regex!($($x)*)))
   };
   ( (?<= $($x:tt)*) ) => {
-    LookBehind(regex!($($x)*))
+    LookBehind(_regex!($($x)*))
   };
   ( (?<! $($x:tt)*) ) => {
-    LookBehind(Not(regex!($($x)*)))
+    LookBehind(Not(_regex!($($x)*)))
   };
   ( ($($x:tt)*) ) => {
-    regex!($($x)*)
+    _regex!($($x)*)
   };
   ( {$x:expr} ) => {
     $x
@@ -40,19 +54,19 @@ macro_rules! regex {
     Concat(FromDfa(Dot), Concat(FromDfa(Dot), FromDfa(Dot)))
   };
   ( $x:tt | $($y:tt)* ) => {
-    Or(regex!($x), regex!($($y)*))
+    Or(_regex!($x), _regex!($($y)*))
   };
   ( $x:tt ? $($y:tt)* ) => {
-    regex!({Or(FromDfa(Empty), regex!($x))} $($y)*)
+    _regex!({Or(FromDfa(Empty), _regex!($x))} $($y)*)
   };
   ( $x:tt * $($y:tt)* ) => {
-    regex!({Or(FromDfa(Empty), Plus(regex!($x)))} $($y)*)
+    _regex!({Or(FromDfa(Empty), Plus(_regex!($x)))} $($y)*)
   };
   ( $x:tt + $($y:tt)* ) => {
-    regex!({Plus(regex!($x))} $($y)*)
+    _regex!({Plus(_regex!($x))} $($y)*)
   };
   ( $x:tt $($y:tt)+ ) => {
-    Concat(regex!($x), regex!($($y)+))
+    Concat(_regex!($x), _regex!($($y)+))
   };
 }
 
