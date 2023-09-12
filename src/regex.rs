@@ -111,3 +111,6 @@ pub struct LookBehind<A>(pub A);
 
 #[derive(Debug, Clone, Copy)]
 pub struct FromDfa<A>(pub A);
+
+#[derive(Debug, Clone, Copy)]
+pub struct And<A, B>(pub A, pub B);

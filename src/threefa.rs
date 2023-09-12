@@ -1,5 +1,6 @@
 use crate::*;
 
+mod and;
 mod concat;
 mod end;
 mod from_dfa;
