@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+mod bake_dfa;
 mod dfa;
 mod equal;
 mod finite;
@@ -8,6 +9,7 @@ mod regex;
 mod threefa;
 mod to_regex;
 
+use bake_dfa::*;
 use dfa::*;
 use equal::*;
 use finite::*;
@@ -58,5 +60,7 @@ fn main() {
     Ok(())
   );
 
-  println!("{}", to_regex(regex![ ^ (?=a* b) aaa ], alphabet));
+  println!("{}", to_regex(y, alphabet));
+
+  dbg!(bake_dfa(y, alphabet));
 }
