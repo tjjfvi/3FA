@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "dfa-lookaround-test"
+name = "threefa"
 version = "0.1.0"
